@@ -25,10 +25,15 @@
 #include "wsrep/view.hpp"
 #include "wsrep/exception.hpp"
 #include "wsrep/logger.hpp"
+#include "wsrep/thread_service.hpp"
 
-#include <wsrep_api.h>
+#include "thread_service_v1.hpp"
+#include "v26/wsrep_api.h"
 
+
+#include <dlfcn.h>
 #include <cassert>
+#include <climits>
 
 #include <iostream>
 #include <sstream>
@@ -107,69 +112,51 @@ namespace
     inline uint32_t map_one(const int flags, const F from,
                             const T to)
     {
-        return ((flags & from) ? to : 0);
+        // INT_MAX because GCC 4.4 does not eat numeric_limits<int>::max()
+        // in static_assert
+        static_assert(WSREP_FLAGS_LAST < INT_MAX,
+                      "WSREP_FLAGS_LAST < INT_MAX");
+        return static_cast<uint32_t>((flags & static_cast<int>(from)) ?
+                                     static_cast<int>(to) : 0);
     }
 
     uint32_t map_flags_to_native(int flags)
     {
-        using wsrep::provider;
-        return (map_one(flags,
-                        provider::flag::start_transaction,
-                        WSREP_FLAG_TRX_START) |
-                map_one(flags,
-                        provider::flag::commit,
-                        WSREP_FLAG_TRX_END) |
-                map_one(flags,
-                        provider::flag::rollback,
-                        WSREP_FLAG_ROLLBACK) |
-                map_one(flags,
-                        provider::flag::isolation,
-                        WSREP_FLAG_ISOLATION) |
-                map_one(flags,
-                        provider::flag::pa_unsafe,
-                        WSREP_FLAG_PA_UNSAFE) |
-                // map_one(flags, provider::flag::commutative, WSREP_FLAG_COMMUTATIVE) |
-                // map_one(flags, provider::flag::native, WSREP_FLAG_NATIVE) |
-                map_one(flags,
-                        provider::flag::prepare,
-                        WSREP_FLAG_TRX_PREPARE) |
-                map_one(flags,
-                        provider::flag::snapshot,
-                        WSREP_FLAG_SNAPSHOT) |
-                map_one(flags,
-                        provider::flag::implicit_deps,
-                        WSREP_FLAG_IMPLICIT_DEPS));
+      using wsrep::provider;
+      return static_cast<uint32_t>(
+          map_one(flags, provider::flag::start_transaction,
+                  WSREP_FLAG_TRX_START) |
+          map_one(flags, provider::flag::commit, WSREP_FLAG_TRX_END) |
+          map_one(flags, provider::flag::rollback, WSREP_FLAG_ROLLBACK) |
+          map_one(flags, provider::flag::isolation, WSREP_FLAG_ISOLATION) |
+          map_one(flags, provider::flag::pa_unsafe, WSREP_FLAG_PA_UNSAFE) |
+          // map_one(flags, provider::flag::commutative, WSREP_FLAG_COMMUTATIVE)
+          // |
+          // map_one(flags, provider::flag::native, WSREP_FLAG_NATIVE) |
+          map_one(flags, provider::flag::prepare, WSREP_FLAG_TRX_PREPARE) |
+          map_one(flags, provider::flag::snapshot, WSREP_FLAG_SNAPSHOT) |
+          map_one(flags, provider::flag::implicit_deps,
+                  WSREP_FLAG_IMPLICIT_DEPS));
     }
 
-    int map_flags_from_native(uint32_t flags)
+    int map_flags_from_native(uint32_t flags_u32)
     {
-        using wsrep::provider;
-        return (map_one(flags,
-                        WSREP_FLAG_TRX_START,
-                        provider::flag::start_transaction) |
-                map_one(flags,
-                        WSREP_FLAG_TRX_END,
-                        provider::flag::commit) |
-                map_one(flags,
-                        WSREP_FLAG_ROLLBACK,
-                        provider::flag::rollback) |
-                map_one(flags,
-                        WSREP_FLAG_ISOLATION,
-                        provider::flag::isolation) |
-                map_one(flags,
-                        WSREP_FLAG_PA_UNSAFE,
-                        provider::flag::pa_unsafe) |
-                // map_one(flags, provider::flag::commutative, WSREP_FLAG_COMMUTATIVE) |
-                // map_one(flags, provider::flag::native, WSREP_FLAG_NATIVE) |
-                map_one(flags,
-                        WSREP_FLAG_TRX_PREPARE,
-                        provider::flag::prepare) |
-                map_one(flags,
-                        WSREP_FLAG_SNAPSHOT,
-                        provider::flag::snapshot) |
-                map_one(flags,
-                        WSREP_FLAG_IMPLICIT_DEPS,
-                        provider::flag::implicit_deps));
+      using wsrep::provider;
+      const int flags(static_cast<int>(flags_u32));
+      return static_cast<int>(
+          map_one(flags, WSREP_FLAG_TRX_START,
+                  provider::flag::start_transaction) |
+          map_one(flags, WSREP_FLAG_TRX_END, provider::flag::commit) |
+          map_one(flags, WSREP_FLAG_ROLLBACK, provider::flag::rollback) |
+          map_one(flags, WSREP_FLAG_ISOLATION, provider::flag::isolation) |
+          map_one(flags, WSREP_FLAG_PA_UNSAFE, provider::flag::pa_unsafe) |
+          // map_one(flags, provider::flag::commutative, WSREP_FLAG_COMMUTATIVE)
+          // |
+          // map_one(flags, provider::flag::native, WSREP_FLAG_NATIVE) |
+          map_one(flags, WSREP_FLAG_TRX_PREPARE, provider::flag::prepare) |
+          map_one(flags, WSREP_FLAG_SNAPSHOT, provider::flag::snapshot) |
+          map_one(flags, WSREP_FLAG_IMPLICIT_DEPS,
+                  provider::flag::implicit_deps));
     }
 
     class mutable_ws_handle
@@ -233,7 +220,16 @@ namespace
             : ws_meta_(ws_meta)
             , trx_meta_()
             , flags_(flags)
-        { }
+        {
+            std::memcpy(trx_meta_.gtid.uuid.data, ws_meta.group_id().data(),
+                        sizeof(trx_meta_.gtid.uuid.data));
+            trx_meta_.gtid.seqno = seqno_to_native(ws_meta.seqno());
+            std::memcpy(trx_meta_.stid.node.data, ws_meta.server_id().data(),
+                        sizeof(trx_meta_.stid.node.data));
+            trx_meta_.stid.conn = ws_meta.client_id().get();
+            trx_meta_.stid.trx = ws_meta.transaction_id().get();
+            trx_meta_.depends_on = seqno_to_native(ws_meta.depends_on());
+        }
 
         ~mutable_ws_meta()
         {
@@ -299,7 +295,7 @@ namespace
      * be made explicit. */
     int map_capabilities_from_native(wsrep_cap_t capabilities)
     {
-        return capabilities;
+        return static_cast<int>(capabilities);
     }
     wsrep::view view_from_native(const wsrep_view_info& view_info,
                                  const wsrep::id& own_id)
@@ -333,7 +329,11 @@ namespace
             // by the ID.
             for (size_t i(0); i < members.size(); ++i)
             {
-                if (own_id == members[i].id()) { own_idx = i; break; }
+                if (own_id == members[i].id())
+                {
+                    own_idx = static_cast<int>(i);
+                    break;
+                }
             }
         }
 
@@ -362,11 +362,18 @@ namespace
         wsrep::server_state& server_state(
             *reinterpret_cast<wsrep::server_state*>(app_ctx));
         wsrep::view view(view_from_native(*view_info, server_state.id()));
-        assert(view.own_index() >= 0);
+        const ssize_t own_index(view.own_index());
+        assert(own_index >= 0);
+        if (own_index < 0)
+        {
+            wsrep::log_error() << "Connected without being in reported view";
+            return WSREP_CB_FAILURE;
+        }
         assert(// first connect
-               server_state.id().is_undefined() ||
-               // reconnect to primary component
-               server_state.id() == view.members()[view.own_index()].id());
+            server_state.id().is_undefined() ||
+            // reconnect to primary component
+            server_state.id() ==
+            view.members()[static_cast<size_t>(own_index)].id());
         try
         {
             server_state.on_connect(view);
@@ -579,11 +586,121 @@ namespace
             break;
         }
     }
+<<<<<<< HEAD
+||||||| 58aa3e8
+}
+=======
 
+    static int init_thread_service(void* dlh,
+                                   wsrep::thread_service* thread_service)
+    {
+        assert(thread_service);
+        if (wsrep::thread_service_v1_probe(dlh))
+        {
+            // No support in library.
+            return 0;
+        }
+        else
+        {
+            if (thread_service->before_init())
+            {
+                wsrep::log_error() << "Thread service before init failed";
+                return 1;
+            }
+            wsrep::thread_service_v1_init(dlh, thread_service);
+            if (thread_service->after_init())
+            {
+                wsrep::log_error() << "Thread service after init failed";
+                return 1;
+            }
+        }
+        return 0;
+    }
+}
+>>>>>>> cs/master
+
+<<<<<<< HEAD
     void abort_cb(void)
+||||||| 58aa3e8
+wsrep::wsrep_provider_v26::wsrep_provider_v26(
+    wsrep::server_state& server_state,
+    const std::string& provider_options,
+    const std::string& provider_spec)
+    : provider(server_state)
+    , wsrep_()
+{
+    wsrep_gtid_t state_id;
+    bool encryption_enabled = server_state.encryption_service() &&
+                              server_state.encryption_service()->encryption_enabled();
+    std::memcpy(state_id.uuid.data,
+                server_state.initial_position().id().data(),
+                sizeof(state_id.uuid.data));
+    state_id.seqno = server_state.initial_position().seqno().get();
+    struct wsrep_init_args init_args;
+    memset(&init_args, 0, sizeof(init_args));
+    init_args.app_ctx = &server_state;
+    init_args.node_name = server_state_.name().c_str();
+    init_args.node_address = server_state_.address().c_str();
+    init_args.node_incoming = server_state_.incoming_address().c_str();
+    init_args.data_dir = server_state_.working_dir().c_str();
+    init_args.options = provider_options.c_str();
+    init_args.proto_ver = server_state.max_protocol_version();
+    init_args.state_id = &state_id;
+    init_args.state = 0;
+    init_args.logger_cb = &logger_cb;
+    init_args.connected_cb = &connected_cb;
+    init_args.view_cb = &view_cb;
+    init_args.sst_request_cb = &sst_request_cb;
+    init_args.encrypt_cb = encryption_enabled ? encrypt_cb : NULL;
+    init_args.apply_cb = &apply_cb;
+    init_args.unordered_cb = 0;
+    init_args.sst_donate_cb = &sst_donate_cb;
+    init_args.synced_cb = &synced_cb;
+
+    if (wsrep_load(provider_spec.c_str(), &wsrep_, 0))
+=======
+wsrep::wsrep_provider_v26::wsrep_provider_v26(
+    wsrep::server_state& server_state,
+    const std::string& provider_options,
+    const std::string& provider_spec,
+    const wsrep::provider::services& services)
+    : provider(server_state)
+    , wsrep_()
+{
+    wsrep_gtid_t state_id;
+    bool encryption_enabled = server_state.encryption_service() &&
+                              server_state.encryption_service()->encryption_enabled();
+    std::memcpy(state_id.uuid.data,
+                server_state.initial_position().id().data(),
+                sizeof(state_id.uuid.data));
+    state_id.seqno = server_state.initial_position().seqno().get();
+    struct wsrep_init_args init_args;
+    memset(&init_args, 0, sizeof(init_args));
+    init_args.app_ctx = &server_state;
+    init_args.node_name = server_state_.name().c_str();
+    init_args.node_address = server_state_.address().c_str();
+    init_args.node_incoming = server_state_.incoming_address().c_str();
+    init_args.data_dir = server_state_.working_dir().c_str();
+    init_args.options = provider_options.c_str();
+    init_args.proto_ver = server_state.max_protocol_version();
+    init_args.state_id = &state_id;
+    init_args.state = 0;
+    init_args.logger_cb = &logger_cb;
+    init_args.connected_cb = &connected_cb;
+    init_args.view_cb = &view_cb;
+    init_args.sst_request_cb = &sst_request_cb;
+    init_args.encrypt_cb = encryption_enabled ? encrypt_cb : NULL;
+    init_args.apply_cb = &apply_cb;
+    init_args.unordered_cb = 0;
+    init_args.sst_donate_cb = &sst_donate_cb;
+    init_args.synced_cb = &synced_cb;
+
+    if (wsrep_load(provider_spec.c_str(), &wsrep_, logger_cb))
+>>>>>>> cs/master
     {
         wsrep_sst_cancel(false);
     }
+<<<<<<< HEAD
 
 #ifdef HAVE_PSI_INTERFACE
     void pfs_instr_cb(wsrep_pfs_instr_type_t type, wsrep_pfs_instr_ops_t ops,
@@ -592,6 +709,22 @@ namespace
                       void **alliedvalue __attribute__((unused)),
                       const void *ts __attribute__((unused))) {
       return wsrep_pfs_instr_cb(type, ops, tag, value, alliedvalue, ts);
+||||||| 58aa3e8
+    if (wsrep_->init(wsrep_, &init_args) != WSREP_OK)
+    {
+        throw wsrep::runtime_error("Failed to initialize wsrep provider");
+=======
+
+    if (services.thread_service &&
+        init_thread_service(wsrep_->dlh, services.thread_service))
+    {
+        throw wsrep::runtime_error("Failed to initialize thread service");
+    }
+
+    if (wsrep_->init(wsrep_, &init_args) != WSREP_OK)
+    {
+        throw wsrep::runtime_error("Failed to initialize wsrep provider");
+>>>>>>> cs/master
     }
 #endif /* HAVE_PSI_INTERFACE */
 
@@ -686,7 +819,7 @@ int wsrep::wsrep_provider_v26::disconnect()
 
 int wsrep::wsrep_provider_v26::capabilities() const
 {
-    return wsrep_->capabilities(wsrep_);
+    return map_capabilities_from_native(wsrep_->capabilities(wsrep_));
 }
 int wsrep::wsrep_provider_v26::desync()
 {
@@ -872,10 +1005,10 @@ wsrep::wsrep_provider_v26::enter_toi(
     return map_return_value(wsrep_->to_execute_start(
                                 wsrep_,
                                 client_id.get(),
-                                &wsrep_keys[0],
+                                wsrep_keys.data(),
                                 wsrep_keys.size(),
                                 &wsrep_buf,
-                                1,
+                                buffer.size() ? 1 : 0,
                                 mmeta.native_flags(),
                                 mmeta.native()));
 }

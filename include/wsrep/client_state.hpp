@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Codership Oy <info@codership.com>
+ * Copyright (C) 2018-2019 Codership Oy <info@codership.com>
  *
  * This file is part of wsrep-lib.
  *
@@ -41,6 +41,8 @@
 #include "lock.hpp"
 #include "buffer.hpp"
 #include "thread.hpp"
+#include "xid.hpp"
+#include "chrono.hpp"
 
 namespace wsrep
 {
@@ -99,10 +101,12 @@ namespace wsrep
             /** Client is in total order isolation mode */
             m_toi,
             /** Client is executing rolling schema upgrade */
-            m_rsu
+            m_rsu,
+            /** Client is executing NBO */
+            m_nbo
         };
 
-        static const int n_modes_ = m_rsu + 1;
+        static const int n_modes_ = m_nbo + 1;
         /**
          * Client state enumeration.
          *
@@ -307,12 +311,37 @@ namespace wsrep
 
         /**
          * Append a key into transaction write set.
+         *
+         * @param key Key to be appended
+         *
+         * @return Zero on success, non-zero on failure.
          */
         int append_key(const wsrep::key& key)
         {
             assert(mode_ == m_local);
             assert(state_ == s_exec);
             return transaction_.append_key(key);
+        }
+
+        /**
+         * Append keys in key_array into transaction write set.
+         *
+         * @param keys Array of keys to be appended
+         *
+         * @return Zero in case of success, non-zero on failure.
+         */
+        int append_keys(const wsrep::key_array& keys)
+        {
+            assert(mode_ == m_local || mode_ == m_toi);
+            assert(state_ == s_exec);
+            for (auto i(keys.begin()); i != keys.end(); ++i)
+            {
+                if (transaction_.append_key(*i))
+                {
+                    return 1;
+                }
+            }
+            return 0;
         }
 
         /**
@@ -411,6 +440,13 @@ namespace wsrep
             return transaction_.start_transaction(wsh, meta);
         }
 
+        int next_fragment(const wsrep::ws_meta& meta)
+        {
+            wsrep::unique_lock<wsrep::mutex> lock(mutex_);
+            assert(mode_ == m_high_priority);
+            return transaction_.next_fragment(meta);
+        }
+
         /** @name Commit ordering interface */
         /** @{ */
         int before_prepare()
@@ -491,6 +527,69 @@ namespace wsrep
         /** @} */
 
         //
+        // XA
+        //
+        /**
+         * Assign transaction external id.
+         *
+         * Other than storing the xid, the transaction is marked as XA.
+         * This should be called when XA transaction is started.
+         *
+         * @param xid transaction id
+         */
+        void assign_xid(const wsrep::xid& xid)
+        {
+            transaction_.assign_xid(xid);
+        }
+
+        /**
+         * Restores the client's transaction to prepared state
+         *
+         * The purpose of this method is to restore transaction state
+         * during recovery of a prepared XA transaction.
+         */
+        int restore_xid(const wsrep::xid& xid)
+        {
+            return transaction_.restore_to_prepared_state(xid);
+        }
+
+        /**
+         * Commit transaction with the given xid
+         *
+         * Sends a commit fragment to terminate the transaction with
+         * the given xid. For the fragment to be sent, a streaming
+         * applier for the transaction must exist, and the transaction
+         * must be in prepared state.
+         *
+         * @param xid the xid of the the transaction to commit
+         *
+         * @return Zero on success, non-zero on error. In case of error
+         *         the client_state's current_error is set
+         */
+        int commit_by_xid(const wsrep::xid& xid)
+        {
+            return transaction_.commit_or_rollback_by_xid(xid, true);
+        }
+
+        /**
+         * Rollback transaction with the given xid
+         *
+         * Sends a rollback fragment to terminate the transaction with
+         * the given xid. For the fragment to be sent, a streaming
+         * applier for the transaction must exist, and the transaction
+         * must be in prepared state.
+         *
+         * @param xid the xid of the the transaction to commit
+         *
+         * @return Zero on success, non-zero on error. In case of error
+         *         the client_state's current_error is set
+         */
+        int rollback_by_xid(const wsrep::xid& xid)
+        {
+            return transaction_.commit_or_rollback_by_xid(xid, false);
+        }
+
+        //
         // BF aborting
         //
         /**
@@ -541,8 +640,6 @@ namespace wsrep
         /**
          * Clone enough state from another transaction so that replaing will
          * be possible with a transaction contained in this client state.
-         * Method after_replay() must be used to inject the state after
-         * replaying back to this client state.
          *
          * @param transaction Transaction which is to be replied in this
          *                    client state
@@ -553,6 +650,7 @@ namespace wsrep
             transaction_.clone_for_replay(transaction);
         }
 
+<<<<<<< HEAD
         /**
          * Deattach the replaying transaction on failure.
          *
@@ -575,22 +673,43 @@ namespace wsrep
             transaction_.after_replay(transaction);
         }
 
+||||||| 58aa3e8
+        /**
+         * Copy state from another transaction context after replay.
+         *
+         * @param transaction Transaction which was used for replaying.
+         */
+        void after_replay(const wsrep::transaction& transaction)
+        {
+            transaction_.after_replay(transaction);
+        }
+
+=======
+>>>>>>> cs/master
         /** @name Non-transactional operations */
         /** @{*/
 
         /**
-         * Enter total order isolation critical section.
+         * Enter total order isolation critical section. If the wait_until
+         * is given non-default value, the operation is retried until
+         * successful, the given time point is reached or the client is
+         * interrupted.
          *
          * @param key_array Array of keys
          * @param buffer Buffer containing the action to execute inside
          *               total order isolation section
          * @param flags  Provider flags for TOI operation
+         * @param wait_until Time point to wait until for successful
+         *                   certification.
          *
          * @return Zero on success, non-zero otherwise.
          */
-        int enter_toi_local(const wsrep::key_array& key_array,
-                            const wsrep::const_buffer& buffer,
-                            int flags);
+        int enter_toi_local(
+            const wsrep::key_array& key_array,
+            const wsrep::const_buffer& buffer,
+            std::chrono::time_point<wsrep::clock>
+            wait_until =
+            std::chrono::time_point<wsrep::clock>());
         /**
          * Enter applier TOI mode
          *
@@ -645,13 +764,76 @@ namespace wsrep
 
         /**
          * Begin non-blocking operation.
+         *
+         * The NBO operation is started by grabbing TOI critical
+         * section. The keys and buffer are certifed as in TOI
+         * operation. If the call fails due to error returned by
+         * the provider, the provider error code can be retrieved
+         * by current_error_status() call.
+         *
+         * If the wait_until is given non-default value, the operation is
+         * retried until successful, the given time point is reached or the
+         * client is interrupted.
+         *
+         * @param keys Array of keys for NBO operation.
+         * @param buffer NBO write set
+         * @param wait_until Time point to wait until for successful certification.
+         * @return Zero in case of success, non-zero in case of failure.
          */
-        int begin_nbo(const wsrep::key_array&);
+        int begin_nbo_phase_one(
+            const wsrep::key_array& keys,
+            const wsrep::const_buffer& buffer,
+            std::chrono::time_point<wsrep::clock>
+            wait_until =
+            std::chrono::time_point<wsrep::clock>());
 
         /**
-         * End non-blocking operation
+         * End non-blocking operation phase after aquiring required
+         * resources for operation.
+         *
+         * @param err definition of the error that happened during the
+         *            execution of phase one (empty for no error)
          */
-        int end_nbo();
+        int end_nbo_phase_one(const wsrep::mutable_buffer& err);
+
+        /**
+         * Enter in NBO mode. This method should be called when the
+         * applier launches the asynchronous process to perform the
+         * operation. The purpose of the call is to adjust
+         * the state and set write set meta data.
+         *
+         * @param ws_meta Write set meta data.
+         *
+         * @return Zero in case of success, non-zero on failure.
+         */
+        int enter_nbo_mode(const wsrep::ws_meta& ws_meta);
+
+        /**
+         * Begin non-blocking operation phase two. The keys argument
+         * passed to this call must contain the same keys which were
+         * passed to begin_nbo_phase_one().
+         *
+         * If the wait_until is given non-default value, the operation is
+         * retried until successful, the given time point is reached or the
+         * client is interrupted.
+         *
+         * @param keys Key array.
+         * @param wait_until Time point to wait until for entering TOI for
+         *                   phase two.
+         */
+        int begin_nbo_phase_two(const wsrep::key_array& keys,
+                                std::chrono::time_point<wsrep::clock>
+                                wait_until =
+                                std::chrono::time_point<wsrep::clock>());
+
+        /**
+         * End non-blocking operation phase two. This call will
+         * release TOI critical section and set the mode to m_local.
+         *
+         * @param err definition of the error that happened during the
+         *            execution of phase two (empty for no error)
+         */
+        int end_nbo_phase_two(const wsrep::mutable_buffer& err);
 
         /**
          * Get reference to the client mutex.
@@ -843,6 +1025,7 @@ namespace wsrep
             , state_hist_()
             , transaction_(*this)
             , toi_meta_()
+            , nbo_meta_()
             , allow_dirty_reads_()
             , sync_wait_gtid_()
             , last_written_gtid_()
@@ -867,6 +1050,7 @@ namespace wsrep
             wsrep::unique_lock<wsrep::mutex>& lock);
         void update_last_written_gtid(const wsrep::gtid&);
         void debug_log_state(const char*) const;
+        void debug_log_keys(const wsrep::key_array& keys) const;
         void state(wsrep::unique_lock<wsrep::mutex>& lock, enum state state);
         void mode(wsrep::unique_lock<wsrep::mutex>& lock, enum mode mode);
 
@@ -877,7 +1061,18 @@ namespace wsrep
                             enum wsrep::provider::status status =
                             wsrep::provider::success);
 
-        void enter_toi_common();
+        // Poll provider::enter_toi() until return status from provider
+        // does not indicate certification failure, timeout expires
+        // or client is interrupted.
+        enum wsrep::provider::status
+        poll_enter_toi(wsrep::unique_lock<wsrep::mutex>& lock,
+                       const wsrep::key_array& keys,
+                       const wsrep::const_buffer& buffer,
+                       wsrep::ws_meta& meta,
+                       int flags,
+                       std::chrono::time_point<wsrep::clock> wait_until,
+                       bool& timed_out);
+        void enter_toi_common(wsrep::unique_lock<wsrep::mutex>&);
         void leave_toi_common();
 
         wsrep::thread::id owning_thread_id_;
@@ -893,6 +1088,7 @@ namespace wsrep
         std::vector<enum state> state_hist_;
         wsrep::transaction transaction_;
         wsrep::ws_meta toi_meta_;
+        wsrep::ws_meta nbo_meta_;
         bool allow_dirty_reads_;
         wsrep::gtid sync_wait_gtid_;
         wsrep::gtid last_written_gtid_;
@@ -944,6 +1140,7 @@ namespace wsrep
         case wsrep::client_state::m_high_priority: return "high priority";
         case wsrep::client_state::m_toi: return "toi";
         case wsrep::client_state::m_rsu: return "rsu";
+        case wsrep::client_state::m_nbo: return "nbo";
         }
         return "unknown";
     }

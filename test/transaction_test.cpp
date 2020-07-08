@@ -998,6 +998,8 @@ BOOST_FIXTURE_TEST_CASE(
 BOOST_FIXTURE_TEST_CASE(transaction_1pc_applying,
                         applying_client_fixture)
 {
+    start_transaction(wsrep::transaction_id(1),
+                      wsrep::seqno(1));
     BOOST_REQUIRE(cc.before_commit() == 0);
     BOOST_REQUIRE(tc.state() == wsrep::transaction::s_committing);
     BOOST_REQUIRE(cc.ordered_commit() == 0);
@@ -1110,6 +1112,8 @@ BOOST_FIXTURE_TEST_CASE(transaction_streaming_1pc_bf_abort_during_fragment_remov
     BOOST_REQUIRE(tc.state() == wsrep::transaction::s_aborted);
     BOOST_REQUIRE(cc.after_statement());
     BOOST_REQUIRE(tc.active() == false);
+    wsrep_test::terminate_streaming_applier(sc, sc.id(),
+                                            wsrep::transaction_id(1));
 }
 
 //
@@ -1152,6 +1156,9 @@ BOOST_FIXTURE_TEST_CASE(transaction_row_streaming_bf_abort_executing,
     BOOST_REQUIRE(cc.before_rollback() == 0);
     BOOST_REQUIRE(cc.after_rollback() == 0);
     BOOST_REQUIRE(cc.after_statement());
+    wsrep_test::terminate_streaming_applier(sc, sc.id(),
+                                            wsrep::transaction_id(1));
+
 }
 //
 // Test streaming certification failure during fragment replication
@@ -1410,8 +1417,4 @@ BOOST_AUTO_TEST_CASE(transaction_state_strings)
     BOOST_REQUIRE(
         wsrep::to_string(
             wsrep::transaction::s_replaying) == "replaying");
-    BOOST_REQUIRE(
-        wsrep::to_string(
-            static_cast<enum wsrep::transaction::state>(0xff)) == "unknown");
-
 }

@@ -67,19 +67,27 @@ if (NOT CMAKE_CXX_STANDARD OR CMAKE_CXX_STANDARD LESS 11)
   endif()
 endif()
 
+# C flags
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -Wconversion")
 # CXX flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Woverloaded-virtual -g")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Woverloaded-virtual -Wconversion -g")
 
 if (WSREP_LIB_STRICT_BUILD_FLAGS)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Weffc++")
 endif()
 if (WSREP_LIB_MAINTAINER_MODE)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
+endif()
+
+# Enable extra libstdc++ assertions with debug build.
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+  add_definitions("-D_GLIBCXX_ASSERTIONS")
 endif()
 
 # Set up include directories
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/include")
-include_directories("${CMAKE_CURRENT_SOURCE_DIR}/wsrep-API/v26")
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/wsrep-API")
 
 if (WSREP_LIB_WITH_UNIT_TESTS)
   find_package(Boost 1.54.0 REQUIRED
