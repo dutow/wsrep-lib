@@ -1,11 +1,4 @@
 [submodule "wsrep-API/v26"]
 	path = wsrep-API/v26
-<<<<<<< HEAD
-	url = https://github.com/percona/wsrep-API.git
-	branch = percona-4.x-8.0
-||||||| 58aa3e8
-	url = https://github.com/codership/wsrep-API.git
-	branch = master 
-=======
-	url = https://github.com/codership/wsrep-API.git
->>>>>>> cs/master
+	url = https://github.com/dutow/wsrep-API.git
+	branch = merge4_5

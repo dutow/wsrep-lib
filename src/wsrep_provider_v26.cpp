@@ -40,7 +40,7 @@
 
 #include "my_psi_config.h"
 
-extern void wsrep_sst_cancel(bool);
+//extern void wsrep_sst_cancel(bool);
 
 extern void wsrep_pfs_instr_cb(wsrep_pfs_instr_type_t type,
                                wsrep_pfs_instr_ops_t ops,
@@ -586,10 +586,6 @@ namespace
             break;
         }
     }
-<<<<<<< HEAD
-||||||| 58aa3e8
-}
-=======
 
     static int init_thread_service(void* dlh,
                                    wsrep::thread_service* thread_service)
@@ -616,49 +612,9 @@ namespace
         }
         return 0;
     }
+
 }
->>>>>>> cs/master
 
-<<<<<<< HEAD
-    void abort_cb(void)
-||||||| 58aa3e8
-wsrep::wsrep_provider_v26::wsrep_provider_v26(
-    wsrep::server_state& server_state,
-    const std::string& provider_options,
-    const std::string& provider_spec)
-    : provider(server_state)
-    , wsrep_()
-{
-    wsrep_gtid_t state_id;
-    bool encryption_enabled = server_state.encryption_service() &&
-                              server_state.encryption_service()->encryption_enabled();
-    std::memcpy(state_id.uuid.data,
-                server_state.initial_position().id().data(),
-                sizeof(state_id.uuid.data));
-    state_id.seqno = server_state.initial_position().seqno().get();
-    struct wsrep_init_args init_args;
-    memset(&init_args, 0, sizeof(init_args));
-    init_args.app_ctx = &server_state;
-    init_args.node_name = server_state_.name().c_str();
-    init_args.node_address = server_state_.address().c_str();
-    init_args.node_incoming = server_state_.incoming_address().c_str();
-    init_args.data_dir = server_state_.working_dir().c_str();
-    init_args.options = provider_options.c_str();
-    init_args.proto_ver = server_state.max_protocol_version();
-    init_args.state_id = &state_id;
-    init_args.state = 0;
-    init_args.logger_cb = &logger_cb;
-    init_args.connected_cb = &connected_cb;
-    init_args.view_cb = &view_cb;
-    init_args.sst_request_cb = &sst_request_cb;
-    init_args.encrypt_cb = encryption_enabled ? encrypt_cb : NULL;
-    init_args.apply_cb = &apply_cb;
-    init_args.unordered_cb = 0;
-    init_args.sst_donate_cb = &sst_donate_cb;
-    init_args.synced_cb = &synced_cb;
-
-    if (wsrep_load(provider_spec.c_str(), &wsrep_, 0))
-=======
 wsrep::wsrep_provider_v26::wsrep_provider_v26(
     wsrep::server_state& server_state,
     const std::string& provider_options,
@@ -696,24 +652,9 @@ wsrep::wsrep_provider_v26::wsrep_provider_v26(
     init_args.synced_cb = &synced_cb;
 
     if (wsrep_load(provider_spec.c_str(), &wsrep_, logger_cb))
->>>>>>> cs/master
     {
-        wsrep_sst_cancel(false);
+        //wsrep_sst_cancel(false);
     }
-<<<<<<< HEAD
-
-#ifdef HAVE_PSI_INTERFACE
-    void pfs_instr_cb(wsrep_pfs_instr_type_t type, wsrep_pfs_instr_ops_t ops,
-                      wsrep_pfs_instr_tag_t tag,
-                      void **value __attribute__((unused)),
-                      void **alliedvalue __attribute__((unused)),
-                      const void *ts __attribute__((unused))) {
-      return wsrep_pfs_instr_cb(type, ops, tag, value, alliedvalue, ts);
-||||||| 58aa3e8
-    if (wsrep_->init(wsrep_, &init_args) != WSREP_OK)
-    {
-        throw wsrep::runtime_error("Failed to initialize wsrep provider");
-=======
 
     if (services.thread_service &&
         init_thread_service(wsrep_->dlh, services.thread_service))
@@ -724,12 +665,10 @@ wsrep::wsrep_provider_v26::wsrep_provider_v26(
     if (wsrep_->init(wsrep_, &init_args) != WSREP_OK)
     {
         throw wsrep::runtime_error("Failed to initialize wsrep provider");
->>>>>>> cs/master
     }
-#endif /* HAVE_PSI_INTERFACE */
 
-}  // namespace
-
+}
+/*
 wsrep::wsrep_provider_v26::wsrep_provider_v26(
     wsrep::server_state &server_state, const std::string &provider_options,
     const std::string &provider_spec)
@@ -766,7 +705,7 @@ wsrep::wsrep_provider_v26::wsrep_provider_v26(
   init_args.pfs_instr_cb = NULL;
 #ifdef HAVE_PSI_INTERFACE
   init_args.pfs_instr_cb = pfs_instr_cb;
-#endif /* HAVE_PSI_INTERFACE */
+#endif 
 
   if (wsrep_load(provider_spec.c_str(), &wsrep_, &logger_cb)) {
     throw wsrep::runtime_error("Failed to load wsrep library");
@@ -784,7 +723,7 @@ wsrep::wsrep_provider_v26::wsrep_provider_v26(
       }
     }
   }
-}
+}*/
 
 wsrep::wsrep_provider_v26::~wsrep_provider_v26()
 {

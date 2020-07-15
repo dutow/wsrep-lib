@@ -985,6 +985,9 @@ bool wsrep::transaction::bf_abort(
             server_service_.background_rollback(client_state_);
         }
     }
+
+    client_service_.debug_sync("wsrep_after_bf_abort");
+
     return ret;
 }
 
@@ -1010,7 +1013,6 @@ void wsrep::transaction::clone_for_replay(const wsrep::transaction& other)
     state_ = s_replaying;
 }
 
-<<<<<<< HEAD
 void wsrep::transaction::deattach_after_replay()
 {
     // state = s_replaying when replaying transaction fails with
@@ -1023,10 +1025,6 @@ void wsrep::transaction::deattach_after_replay()
     ws_meta_ = wsrep::ws_meta();
 }
 
-void wsrep::transaction::after_replay(const wsrep::transaction& other)
-||||||| 58aa3e8
-void wsrep::transaction::after_replay(const wsrep::transaction& other)
-=======
 int wsrep::transaction::restore_to_prepared_state(const wsrep::xid& xid)
 {
     wsrep::unique_lock<wsrep::mutex> lock(client_state_.mutex_);
@@ -1042,7 +1040,6 @@ int wsrep::transaction::restore_to_prepared_state(const wsrep::xid& xid)
 
 int wsrep::transaction::commit_or_rollback_by_xid(const wsrep::xid& xid,
                                                   bool commit)
->>>>>>> cs/master
 {
     wsrep::unique_lock<wsrep::mutex> lock(client_state_.mutex_);
     wsrep::server_state& server_state(client_state_.server_state());
