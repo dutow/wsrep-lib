@@ -587,6 +587,17 @@ namespace
         }
     }
 
+
+#ifdef HAVE_PSI_INTERFACE
+    void pfs_instr_cb(wsrep_pfs_instr_type_t type, wsrep_pfs_instr_ops_t ops,
+                      wsrep_pfs_instr_tag_t tag,
+                      void **value __attribute__((unused)),
+                      void **alliedvalue __attribute__((unused)),
+                      const void *ts __attribute__((unused))) {
+      return wsrep_pfs_instr_cb(type, ops, tag, value, alliedvalue, ts);
+    }
+#endif /* HAVE_PSI_INTERFACE */
+
     static int init_thread_service(void* dlh,
                                    wsrep::thread_service* thread_service)
     {
@@ -650,6 +661,11 @@ wsrep::wsrep_provider_v26::wsrep_provider_v26(
     init_args.unordered_cb = 0;
     init_args.sst_donate_cb = &sst_donate_cb;
     init_args.synced_cb = &synced_cb;
+
+  init_args.pfs_instr_cb = NULL;
+#ifdef HAVE_PSI_INTERFACE
+  init_args.pfs_instr_cb = pfs_instr_cb;
+#endif 
 
     if (wsrep_load(provider_spec.c_str(), &wsrep_, logger_cb))
     {
